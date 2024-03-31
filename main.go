@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"net/http/httputil"
 	"net/url"
@@ -20,5 +21,8 @@ type ServerPool struct {
 }
 
 func main() {
-	fmt.Println("A simple load-balancer implementiaiton in golang")
+	var port int
+	flag.IntVar(&port, "port", 3030, "Port to Serve")
+	flag.Parse()
+	fmt.Println("A simple load-balancer implementiaiton in golang on port:- ", port)
 }
