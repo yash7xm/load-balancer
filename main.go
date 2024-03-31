@@ -3,6 +3,8 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
+	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"sync"
@@ -24,5 +26,13 @@ func main() {
 	var port int
 	flag.IntVar(&port, "port", 3030, "Port to Serve")
 	flag.Parse()
-	fmt.Println("A simple load-balancer implementiaiton in golang on port:- ", port)
+
+	server := http.Server{
+		Addr: fmt.Sprintf(":%d", port),
+	}
+
+	log.Printf("Load Balancer started at :%d\n", port)
+	if err := server.ListenAndServe(); err != nil {
+		log.Fatal(err)
+	}
 }
