@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -10,6 +11,12 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
+)
+
+const (
+	Attempts int = iota
+	Retry
 )
 
 type Backend struct {
@@ -64,8 +71,43 @@ func (s *ServerPool) GetNextPeer() *Backend {
 	return nil
 }
 
+// MarkBackendStatus change the staus of a backend
+func (s *ServerPool) MarkBackendStatus(backendUrl *url.URL, alive bool) {
+	for _, b := range s.backends {
+		if b.URL.String() == backendUrl.String() {
+			b.SetAlive(alive)
+			break
+		}
+	}
+}
+
+// GetAttemptsFromContext returns the attempts for request
+func GetAttemptsFromContext(r *http.Request) int {
+	if attempts, ok := r.Context().Value(Attempts).(int); ok {
+		return attempts
+	}
+
+	return 1
+}
+
+// GetRetryFromContext returns the retries for request
+func GetRetryFromContext(r *http.Request) int {
+	if retry, ok := r.Context().Value(Retry).(int); ok {
+		return retry
+	}
+
+	return 1
+}
+
 // lb load balances the incoming requests
 func lb(w http.ResponseWriter, r *http.Request) {
+	attempts := GetAttemptsFromContext(r)
+	if attempts > 3 {
+		log.Printf("%s(%s) Max attempts reached, terminating\n", r.RemoteAddr, r.URL.Path)
+		http.Error(w, "Service not available", http.StatusServiceUnavailable)
+		return
+	}
+
 	peer := serverPool.GetNextPeer()
 	if peer != nil {
 		peer.ReverseProxy.ServeHTTP(w, r)
@@ -97,6 +139,29 @@ func main() {
 		}
 
 		proxy := httputil.NewSingleHostReverseProxy(serverUrl)
+		proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+			log.Printf("[%s] %s\n", serverUrl.Host, err.Error())
+			retries := GetRetryFromContext(r)
+			if retries < 3 {
+				select {
+				case <-time.After(10 * time.Millisecond):
+					ctx := context.WithValue(r.Context(), Retry, retries+1)
+					log.Printf("Hey i am here")
+					proxy.ServeHTTP(w, r.WithContext(ctx))
+				}
+
+				return
+			}
+
+			// after 3 retries, mark this backend as down
+			serverPool.MarkBackendStatus(serverUrl, false)
+
+			// if the same request routing for few attempts with different backends, increase the count
+			attempts := GetAttemptsFromContext(r)
+			log.Printf("%s(%s) Attempting retry %d\n", r.RemoteAddr, r.URL.Path, attempts)
+			ctx := context.WithValue(r.Context(), Attempts, attempts+1)
+			lb(w, r.WithContext(ctx))
+		}
 
 		serverPool.AddBackend(&Backend{
 			URL:          serverUrl,
