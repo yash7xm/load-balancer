@@ -210,6 +210,10 @@ func main() {
 
 	go healthCheck()
 
+	go startTestServer(3031)
+	go startTestServer(3032)
+	go startTestServer(3033)
+
 	server := http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
 		Handler: http.HandlerFunc(lb),
@@ -219,4 +223,22 @@ func main() {
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func startTestServer(port int) {
+	server := http.Server{
+		Addr:    fmt.Sprintf(":%d", port),
+		Handler: http.HandlerFunc(testServerHandler),
+	}
+
+	go func() {
+		log.Printf("Test server started at http://localhost:%d\n", port)
+		if err := server.ListenAndServe(); err != nil {
+			log.Fatal(err)
+		}
+	}()
+}
+
+func testServerHandler(w http.ResponseWriter, r *http.Request) {
+	w.Write([]byte(r.Host))
 }
