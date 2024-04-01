@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -99,6 +100,42 @@ func GetRetryFromContext(r *http.Request) int {
 	return 1
 }
 
+func (s *ServerPool) HealthCheck() {
+	for _, b := range s.backends {
+		status := "up"
+		alive := isBackendAlive(b.URL)
+		b.SetAlive(alive)
+		if !alive {
+			status = "down"
+		}
+		log.Printf("%s [%s]\n", b.URL, status)
+	}
+}
+
+func isBackendAlive(u *url.URL) bool {
+	timeout := 2 * time.Second
+	conn, err := net.DialTimeout("tcp", u.Host, timeout)
+	if err != nil {
+		log.Println("Site unreachable, error: ", err)
+		return false
+	}
+
+	defer conn.Close()
+	return true
+}
+
+func healthCheck() {
+	t := time.NewTicker(time.Minute * 2)
+	for {
+		select {
+		case <-t.C:
+			log.Println("Starting health check...")
+			serverPool.HealthCheck()
+			log.Println("Health check completed")
+		}
+	}
+}
+
 // lb load balances the incoming requests
 func lb(w http.ResponseWriter, r *http.Request) {
 	attempts := GetAttemptsFromContext(r)
@@ -146,7 +183,6 @@ func main() {
 				select {
 				case <-time.After(10 * time.Millisecond):
 					ctx := context.WithValue(r.Context(), Retry, retries+1)
-					log.Printf("Hey i am here")
 					proxy.ServeHTTP(w, r.WithContext(ctx))
 				}
 
@@ -171,6 +207,8 @@ func main() {
 
 		log.Printf("Configured server: %s\n", serverUrl)
 	}
+
+	go healthCheck()
 
 	server := http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
