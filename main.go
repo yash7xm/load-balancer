@@ -64,6 +64,17 @@ func (s *ServerPool) GetNextPeer() *Backend {
 	return nil
 }
 
+// lb load balances the incoming requests
+func lb(w http.ResponseWriter, r *http.Request) {
+	peer := serverPool.GetNextPeer()
+	if peer != nil {
+		peer.ReverseProxy.ServeHTTP(w, r)
+		return
+	}
+
+	http.Error(w, "Service not available", http.StatusServiceUnavailable)
+}
+
 var serverPool ServerPool
 
 func main() {
@@ -97,7 +108,8 @@ func main() {
 	}
 
 	server := http.Server{
-		Addr: fmt.Sprintf(":%d", port),
+		Addr:    fmt.Sprintf(":%d", port),
+		Handler: http.HandlerFunc(lb),
 	}
 
 	log.Printf("Load Balancer started at http://localhost:%d\n", port)
